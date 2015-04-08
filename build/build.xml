@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<project name="plugin-urlfetch-proxypool" default="dist" basedir="..">
+
+	<property file="build/build.properties" />
+	
+	<property name="src_dir" value="src" />
+	<property name="dist_dir" value="bin" />
+	<property name="classes_dir" value="build/target/classes" />
+
+	<path id="master-classpath">
+		<!-- reference project libraries -->
+		<fileset dir="lib">
+			<include name="**/*.jar" />
+		</fileset>
+	</path>
+
+	<target name="init" description="">
+		<mkdir dir="${dist_dir}" />
+		<mkdir dir="${classes_dir}" />
+		<tstamp>
+			<format property="TODAY" pattern="MM/dd/yyyy hh:mm aa" locale="en" />
+		</tstamp>
+	</target>
+
+	<target name="clean" description="">
+		<delete>
+			<fileset dir="${classes_dir}" />
+		</delete>
+	</target>
+
+	<target name="compile" depends="init,clean">
+		<javac srcdir="${src_dir}" destdir="${classes_dir}" encoding="utf-8" debug="true" failonerror="true" source="1.7" target="1.7" includeantruntime="false">
+			<classpath refid="master-classpath" />
+		</javac>
+	</target>
+
+	<target name="jar" depends="compile">
+		<delete file="${dist_dir}/${module.full.name}.jar" />
+		<delete file="${dist_dir}/${module.src.full.name}.zip" />
+
+		<jar jarfile="${dist_dir}/${module.full.name}.jar">
+			<manifest>
+				<attribute name="Manifest-Version" value="1.0" />
+				<attribute name="Built-By" value="${user.name}" />
+			</manifest>
+			<fileset dir="${classes_dir}" />
+			<fileset dir="${src_dir}" excludes="**/*.java" />
+		</jar>
+		<zip destfile="${dist_dir}/${module.src.full.name}.zip" basedir="${src_dir}" whenempty="create" />
+		
+	</target>
+	<target name="dist" depends="jar">
+	</target>
+</project>
