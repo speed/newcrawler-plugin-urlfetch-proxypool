@@ -12,6 +12,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import com.soso.plugin.UrlFetchPlugin;
+import com.soso.plugin.bo.UrlFetchPluginBo;
 
 public class UrlFetchPluginService implements UrlFetchPlugin{
 	
@@ -36,11 +37,22 @@ public class UrlFetchPluginService implements UrlFetchPlugin{
 		Map<String, String> headers=new HashMap<String, String>(); 
 		
 		crawlUrl="http://proxy.02ta.com/header"; 
-		urlFetchPluginService.execute(properties, headers, crawlUrl, method, cookie, userAgent, encoding);
+		UrlFetchPluginBo urlFetchPluginBo=new UrlFetchPluginBo(properties, headers, crawlUrl, method, cookie, userAgent, encoding);
+		
+		urlFetchPluginService.execute(urlFetchPluginBo);
 	}
 	
 	@Override
-	public Map<String, Object> execute(Map<String, String> properties, Map<String, String> headers, String crawlUrl, String method, String cookie, String userAgent, String encoding) {
+	public Map<String, Object> execute(UrlFetchPluginBo urlFetchPluginBo) {
+		Map<String, String> properties=urlFetchPluginBo.getProperties();
+		Map<String, String> headers=urlFetchPluginBo.getHeaders();
+		String crawlUrl=urlFetchPluginBo.getCrawlUrl();
+		String method=urlFetchPluginBo.getMethod();
+		String cookie=urlFetchPluginBo.getCookie();
+		String userAgent=urlFetchPluginBo.getUserAgent();
+		String encoding=urlFetchPluginBo.getEncoding();
+		
+		
 		String cacheKey=null;
 		String redisIP=null;
 		int redisPort=-1;
