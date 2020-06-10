@@ -10,7 +10,6 @@ import java.util.regex.Pattern;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
-
 public class URLUtil {
 	private final static Log logger = LogFactory.getLog(URLUtil.class);
 	/**
@@ -22,7 +21,7 @@ public class URLUtil {
 		try {
 			return URLUtil.makeAbsoluteURL(new URL(absoluteURL), innerURL);
 		} catch (MalformedURLException e) {
-			logger.error("AbsoluteURL:"+absoluteURL+", InnerURL:"+innerURL, e);
+			logger.error("", e);
 			return null;
 		}
 	}
@@ -36,10 +35,24 @@ public class URLUtil {
 		if (innerURL==null) {
 			innerURL="";
 		}
-		if (innerURL.toLowerCase().startsWith("http://")) {
-			return innerURL;
-		}
 		try {
+			if (innerURL.toLowerCase().startsWith("http://")) {
+				URL url = new URL(innerURL);
+				String path=url.getPath();
+				if(path==null || "".equals(path.trim())){
+					path="/";
+				}
+				String query=url.getQuery();
+				if(query!=null && !"".equals(query.trim())){
+					path+="?"+query;
+				}
+				url = new URL(url.getProtocol(), url.getHost(), url.getPort(), path);
+				return url.toString();
+			}
+			if (innerURL.startsWith("?")) {
+				innerURL=absoluteURL.getPath()+innerURL;
+			}
+			
 			URL url = new URL(absoluteURL, innerURL);
 			return url.toString();
 		} catch (MalformedURLException e) {

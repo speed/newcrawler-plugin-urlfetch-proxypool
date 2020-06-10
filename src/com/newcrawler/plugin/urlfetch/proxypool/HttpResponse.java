@@ -1,26 +1,25 @@
 package com.newcrawler.plugin.urlfetch.proxypool;
 
+import java.io.Serializable;
+import java.net.HttpCookie;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 响应对象
  */
-public class HttpResponse {
-
-	private Map<String, String> cookies;
+public class HttpResponse implements Serializable{
+	private static final long serialVersionUID = 4045756729934190952L;
 	private int length;
 	private String content;// 内容
 	private String realURL;
 	private String contentEncoding;
 	private int responseCode;
-	private Map<String, Map<String, List<String>>> headerMap;
-	public Map<String, String> getCookies() {
-		return cookies;
-	}
-	public void setCookies(Map<String, String> cookies) {
-		this.cookies = cookies;
-	}
+	private Map<String,String> headers;
+	private List<HttpCookie> cookieList;
+	
+	private String remark;// 内容
+	
 	public int getLength() {
 		return length;
 	}
@@ -51,10 +50,22 @@ public class HttpResponse {
 	public void setResponseCode(int responseCode) {
 		this.responseCode = responseCode;
 	}
-	public Map<String, Map<String, List<String>>> getHeaderMap() {
-		return headerMap;
+	public Map<String, String> getHeaders() {
+		return headers;
 	}
-	public void setHeaderMap(Map<String, Map<String, List<String>>> headerMap) {
-		this.headerMap = headerMap;
+	public void setHeaders(Map<String, String> headers) {
+		this.headers = headers;
+	}
+	public List<HttpCookie> getCookieList() {
+		return cookieList;
+	}
+	public void setCookieList(List<HttpCookie> cookieList) {
+		this.cookieList = cookieList;
+	}
+	public String getRemark() {
+		return remark;
+	}
+	public void setRemark(String remark) {
+		this.remark = remark;
 	}
 }

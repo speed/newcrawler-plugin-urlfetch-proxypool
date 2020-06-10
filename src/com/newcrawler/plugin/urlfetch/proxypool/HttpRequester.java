@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.net.CookieHandler;
+import java.net.HttpCookie;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
@@ -14,9 +16,13 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 import org.apache.commons.logging.Log;
@@ -25,38 +31,18 @@ import org.mozilla.intl.chardet.nsDetector;
 import org.mozilla.intl.chardet.nsPSMDetector;
 
 
-
 /**
  * HTTP请求对象
  * 
- * @author YaoMing
  */
 public final class HttpRequester {
-	private static final Log log = LogFactory.getLog(HttpRequester.class);
+	private final static Log logger = LogFactory.getLog(CrawlerCookieManager.class);
+	
 	private static final String DEFAULT_CHARSET="UTF-8";
-	private static final int TIMEOUT=45000;// GAE限制最大请求延迟60秒
-	private static final int MAX_REDIRECTS=10;// 最大的重定向次数
 	private static enum methods{
 		GET,
 		POST
 	}
-	
-	public static final HttpResponse sendGet(final String urlString, Proxy proxy) throws IOException {
-		return sendGet(urlString, null, null, null, proxy);
-	}
-
-	/**
-	 * 发送GET请求
-	 * 
-	 * @param urlString URL地址
-	 * @param params 参数集合
-	 * @return 响应对象
-	 * @throws IOException
-	 */
-	public static final HttpResponse sendGet(String urlString, String contentEncoding, Proxy proxy)
-			throws IOException {
-		return sendGet(urlString, contentEncoding, null, null, proxy);
-	}
 
 	/**
 	 * 发送GET请求
@@ -67,31 +53,10 @@ public final class HttpRequester {
 	 * @return 响应对象
 	 * @throws IOException
 	 */
-	public static final HttpResponse sendGet(String urlString, String contentEncoding, Map<String, String> propertys, String cookieString, Proxy proxy)throws IOException {
-		return send(urlString, methods.GET.name(), contentEncoding, null, null, propertys, cookieString, proxy);
+	public static final HttpResponse sendGet(RequestBo requestBo)throws IOException {
+		requestBo.setMethod(methods.GET.name());
+		return send(requestBo);
 	}
-
-	/**
-	 * 发送POST请求
-	 * 
-	 * @param urlString
-	 * @return
-	 * @throws IOException
-	 */
-	public static HttpResponse sendPost(final String urlString, Proxy proxy) throws IOException {
-		return sendPost(urlString, null, null, null, null, null, proxy);
-	}
-	/**
-	 * 发送POST请求
-	 * 
-	 * @param urlString URL地址
-	 * @return 响应对象
-	 * @throws IOException
-	 */
-	public static final HttpResponse sendPost(String urlString, String contentEncoding, Proxy proxy) throws IOException {
-		return sendPost(urlString, contentEncoding, null, null, null, null, proxy);
-	}
-
 
 	/**
 	 * 发送POST请求
@@ -102,8 +67,9 @@ public final class HttpRequester {
 	 * @return 响应对象
 	 * @throws IOException
 	 */
-	public static final HttpResponse sendPost(String urlString, String contentEncoding, Map<String, String[]> parameters, String params, Map<String, String> propertys, String cookieString, Proxy proxy)throws IOException {
-		return send(urlString, methods.POST.name(), contentEncoding, parameters, params, propertys, cookieString, proxy);
+	public static final HttpResponse sendPost(RequestBo requestBo)throws IOException {
+		requestBo.setMethod(methods.POST.name());
+		return send(requestBo);
 	}
 	
 	private static final String getParams(String contentEncoding, Map<String, String[]> parameters, String params) throws UnsupportedEncodingException{
@@ -192,18 +158,30 @@ public final class HttpRequester {
 	 * @return 响映对象
 	 * @throws IOException
 	 */
-	public static final HttpResponse send(String urlString, String method, String contentEncoding, Map<String, String[]> parameters, String params, Map<String,String> propertys, String cookieString, Proxy proxy) throws IOException {
-		if(contentEncoding==null || "".equals(contentEncoding)){
-			contentEncoding=DEFAULT_CHARSET;
+	public static final HttpResponse send(RequestBo requestBo) throws IOException {
+		String urlString=requestBo.getUrlString();
+		String method=requestBo.getMethod(); 
+		Map<String, String[]> parameters=requestBo.getParameters(); 
+		String params=requestBo.getParams(); 
+		Map<String, String> propertys=requestBo.getPropertys(); 
+		
+		URL urlObj = new URL(urlString);
+		
+		List<HttpCookie> cookieList = requestBo.getCookieList();
+		if(cookieList!=null){
+			SessionUtils.addCookie(requestBo.getCookieStore(), cookieList);
 		}
+		CrawlerCookieManager cookieManager=new CrawlerCookieManager(requestBo.getCookieStore(), null);
+		CookieHandler.setDefault(cookieManager);
+		
 		if(propertys==null){
 			propertys=new HashMap<String, String>();
 		}
 		
 		if (method.equalsIgnoreCase(methods.GET.name())) {
 			//GET
-			params=getParams(contentEncoding, parameters, params);
-			if(StringUtils.isNotBlank(params)){
+			params=getParams(DEFAULT_CHARSET, parameters, params);
+			if(params!=null && !"".equals(params.trim())){
 				if(urlString.indexOf("?")==-1){
 					urlString +="?" + params;
 				}else{
@@ -212,11 +190,11 @@ public final class HttpRequester {
 			}
 		}else{
 			//POST
-			params=getParams(urlString, contentEncoding, parameters, params);
+			params=getParams(urlString, DEFAULT_CHARSET, parameters, params);
 		}
-		Map<String, Map<String, List<String>>> headerMap=new HashMap<String, Map<String, List<String>>>();
+		
 		// 设置相关属性，具体含义请查阅JDK文档
-		HttpURLConnection urlConnection = initConn(urlString, propertys, cookieString, headerMap, proxy);
+		HttpURLConnection urlConnection = initConn(requestBo.getProxy(), urlObj, propertys, requestBo.getConnectTimeout(), requestBo.getReadTimeout());
 		//如果使用自动重定向HttpURLConnection不会自动绑定第一次请求的COOKIE
 		urlConnection.setRequestMethod(method);
 		
@@ -228,11 +206,23 @@ public final class HttpRequester {
 			urlConnection.getOutputStream().flush();
 			urlConnection.getOutputStream().close();
 		}
-		urlConnection=followRedirects(urlConnection, propertys, cookieString, headerMap, proxy, 0);
+		Set<String> sessionList=new HashSet<String>();
+		sessionList.add(urlString);
 		
-		HttpResponse hr=null;
+		HttpResponse httpResponse = new HttpResponse();
+		urlConnection=followRedirects(requestBo, httpResponse, urlConnection, requestBo.getProxy(), propertys, sessionList, 
+				0, requestBo.getConnectTimeout(), requestBo.getReadTimeout(), requestBo.getRedirectsTimes());
+		
+		List<HttpCookie> newCookieList=requestBo.getCookieStore().getCookies();
+		if(newCookieList!=null){
+			List<HttpCookie> cookies=new ArrayList<HttpCookie>();
+			cookies.addAll(newCookieList);
+			httpResponse.setCookieList(cookies);
+		}
+		
 		try {
-			hr= makeContent(urlString, contentEncoding, urlConnection);
+			makeContent(httpResponse, urlString, requestBo.getContentEncoding(), urlConnection);
+			httpResponse.setHeaders(propertys);
 		} catch (IOException e) {
 			throw e;
 		} finally {
@@ -240,22 +230,24 @@ public final class HttpRequester {
 			if (urlConnection != null)
 				urlConnection.disconnect();
 		}
-		return hr;
+		return httpResponse;
 	}
-	
 
-	private static HttpURLConnection initConn(String urlString, Map<String,String> propertys, String cookieString, Map<String, Map<String, List<String>>> headerMap, Proxy proxy) throws IOException{
-		URL url = new URL(urlString);
-		HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection(proxy);
+	private static HttpURLConnection initConn(Proxy proxy, URL urlObj, Map<String,String> propertys, int connectTimeout, int readTimeout) throws IOException{
+		HttpURLConnection urlConnection = (HttpURLConnection) urlObj.openConnection(proxy);
 		
 		urlConnection.setDoOutput(true);
 		urlConnection.setDoInput(true);
 		urlConnection.setDefaultUseCaches(false);
 		urlConnection.setUseCaches(false);
-		urlConnection.setConnectTimeout(TIMEOUT);
-		urlConnection.setReadTimeout(TIMEOUT);
-		
+		urlConnection.setConnectTimeout(connectTimeout);
+		urlConnection.setReadTimeout(readTimeout);
 		urlConnection.setInstanceFollowRedirects(false);
+		
+		propertys.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
+		propertys.put("Accept-Encoding", "gzip,deflate,sdch");
+		propertys.put("Connection", "Keep-Alive");//在完成本次请求的响应后，断开连接，不要等待本次连接的后续请求了
+		
 		// 赋予请求属性
 		if (!propertys.isEmpty()){
 			for (String key : propertys.keySet()) {
@@ -265,52 +257,40 @@ public final class HttpRequester {
 				}
 			}
 		}
-		if(cookieString!=null && !"".equals(cookieString.trim())){
-			urlConnection.setRequestProperty("Cookie", cookieString);
-		}
-		
-		//通常指定压缩方法，是否支持压缩，支持什么压缩方法（gzip，deflate） 
-		urlConnection.setRequestProperty("Accept-Encoding", "gzip, deflate");
-		//在完成本次请求的响应后，断开连接，不要等待本次连接的后续请求了
-		urlConnection.setRequestProperty("Connection", "Keep-Alive");
-		
 		return urlConnection;
 	}
-	private static HttpURLConnection followRedirects(HttpURLConnection urlConnection, Map<String,String> propertys, String cookieString, Map<String, Map<String, List<String>>> headerMap, Proxy proxy, int times) throws IOException {  
+	private static HttpURLConnection followRedirects(RequestBo requestBo, HttpResponse httpResponse, HttpURLConnection urlConnection, Proxy proxy, Map<String,String> propertys, Set<String> sessionList, 
+			int times, final int connectTimeout, int readTimeout, final int redirectsTimes) throws IOException {  
 		int statusCode = urlConnection.getResponseCode();  
-		
-		String realURL=urlConnection.getURL().toString();
-		Map<String, List<String>> headerFields=urlConnection.getHeaderFields();
-		headerMap.put(realURL, headerFields);
-	    
-		
 	    String locationHeader = urlConnection.getHeaderField("Location");
+	    String realURL=urlConnection.getURL().toString();
 	    
 	    if(!isRedirected(statusCode, locationHeader)){
 	    	return urlConnection;
 	    }
-	    if(times>MAX_REDIRECTS){
-	    	log.error("URL redirects too many times.");
+	    if(times>redirectsTimes){
+	    	logger.error("URL redirects too many times.");
 	    	return urlConnection;
 	    }
 	    
 	    if(locationHeader==null){
-	    	log.error("Redirects url not found.");
+	    	logger.error("Redirects url not found.");
 	    	return urlConnection;
 	    }
+	    urlConnection.disconnect();
 	    
-	    if(!locationHeader.toLowerCase().startsWith("http://") && !locationHeader.toLowerCase().startsWith("https://")){
-	    	log.error("Redirects url["+locationHeader+"] errors.");
-	    	return urlConnection;
-	    }
+	    String urlString=URLUtil.makeAbsoluteURL(realURL, locationHeader);
 	    
-		urlConnection.disconnect();
 		propertys.put("Referer", realURL);
 		
-		urlConnection = initConn(locationHeader, propertys, cookieString, headerMap, proxy);
+		if(!sessionList.contains(urlString)){
+			sessionList.add(urlString);
+		}
+		URL urlObj = new URL(urlString);
+		urlConnection = initConn(proxy, urlObj, propertys, connectTimeout, readTimeout);
 		urlConnection.setRequestMethod("GET");
     	
-    	return followRedirects(urlConnection, propertys, cookieString, headerMap, proxy, ++times);
+    	return followRedirects(requestBo, httpResponse, urlConnection, proxy, propertys, sessionList, ++times, connectTimeout, readTimeout, redirectsTimes);
 	}
 	private static boolean isRedirected(int statusCode, String locationHeader) throws IOException {  
         switch(statusCode){
@@ -327,6 +307,112 @@ public final class HttpRequester {
 	            return false;
         } 
     }
+	public static final HttpResponse sendFile(RequestBo requestBo) throws IOException {
+		String urlString=requestBo.getUrlString();
+		String receiveEncoding=requestBo.getContentEncoding();
+		Map<String, String[]> parameters=requestBo.getParameters();
+		Map<String,String> propertys=requestBo.getPropertys();
+		Map<String, String[]> fileParameters=requestBo.getFileParameters();
+		
+		HttpURLConnection urlConnection = null;
+		final String BOUNDARY = "---------------------------7dc17d1d2082e";
+		StringBuffer param = new StringBuffer();
+		if (parameters != null){
+			for (String key : parameters.keySet()) {
+				String[] temp=parameters.get(key);
+				for(String t:temp){
+					param.append("--");
+					param.append(BOUNDARY);
+					param.append("\r\n");
+					param.append("Content-Disposition: form-data; name=\""+ key + "\" \r\n\r\n");
+					param.append(t);
+					param.append("\r\n");
+				}
+			}
+		}
+		
+		if (fileParameters != null){
+			for (String key : fileParameters.keySet()) {
+				String[] temp=fileParameters.get(key);
+				for(String fileUrl:temp){
+					if(fileUrl==null || "".equals(fileUrl)){
+						continue;
+					}
+					byte[] fileByte = null;
+					try{
+						URL url = new URL(fileUrl);
+						HttpURLConnection fileConnection = (HttpURLConnection) url.openConnection(requestBo.getProxy());
+						fileConnection.setConnectTimeout(requestBo.getConnectTimeout());
+						fileConnection.setReadTimeout(requestBo.getReadTimeout());
+						if (propertys != null){
+							for (String propertysKey : propertys.keySet()) {
+								fileConnection.setRequestProperty(propertysKey, propertys.get(propertysKey));
+							}
+						}
+						InputStream is = fileConnection.getInputStream();
+						fileByte = readByte(is);
+						fileUrl=fileConnection.getURL().toString();
+					}catch(Exception e){
+						logger.error("send file", e);
+						continue;
+					}
+					int s = fileUrl.lastIndexOf("/");
+					int e = fileUrl.indexOf('?', s);
+					if(e==-1){
+						e= fileUrl.length();
+					}
+					String filename= fileUrl.substring(s + 1,e);
+					param.append("--");
+					param.append(BOUNDARY);
+					param.append("\r\n");
+					param.append("Content-Disposition: form-data; name=\""+key+"\"; filename=\""+ filename + "\"\r\n");
+					param.append("Content-Type: application/x-zip-compressed\r\n\r\n");
+					param.append(fileByte);
+				}
+			}
+		}
+		param.append("\r\n--" + BOUNDARY + "--\r\n");
+		
+		byte[] data = param.toString().getBytes();
+		int contentLength=data.length;
+		
+		URL url = new URL(urlString);
+		urlConnection = (HttpURLConnection) url.openConnection(requestBo.getProxy());
+		urlConnection.setDoOutput(true);
+		urlConnection.setDoInput(true);
+		urlConnection.setDefaultUseCaches(false);
+		urlConnection.setUseCaches(false);
+		urlConnection.setConnectTimeout(requestBo.getConnectTimeout());
+		urlConnection.setReadTimeout(requestBo.getReadTimeout());
+		
+		urlConnection.setRequestMethod("POST");
+		urlConnection.setRequestProperty("Content-Type","multipart/form-data; boundary=" + BOUNDARY); // 设置表单类型和分隔符
+		urlConnection.setRequestProperty("Content-Length", String.valueOf(contentLength)); // 设置内容长度
+		if (propertys != null){
+			for (String key : propertys.keySet()) {
+				urlConnection.setRequestProperty(key, propertys.get(key));
+			}
+		}
+		urlConnection.getOutputStream().write(data);
+		urlConnection.getOutputStream().flush();
+		urlConnection.getOutputStream().close();
+		
+		HttpResponse httpResponse = new HttpResponse();
+		List<HttpCookie> newCookieList=new ArrayList<HttpCookie>();
+		httpResponse.setCookieList(newCookieList);
+		
+		try {
+			makeContent(httpResponse, urlString, receiveEncoding, urlConnection);
+		} catch (IOException e) {
+			throw e;
+		} finally {
+			// 最终关闭流
+			if (urlConnection != null)
+				urlConnection.disconnect();
+		}
+		
+		return httpResponse;
+	}
 	
 	/**
 	 * 得到响应对象
@@ -335,45 +421,50 @@ public final class HttpRequester {
 	 * @return 响应对象
 	 * @throws IOException
 	 */
-	private static final HttpResponse makeContent(String urlString, String contentEncoding, HttpURLConnection urlConnection) throws IOException {
-		int responseCode=urlConnection.getResponseCode();
-		// 得到响应流
-		InputStream inputStream = urlConnection.getInputStream();
-		
-		HttpResponse httpResponser = new HttpResponse();
+	private static final void makeContent(HttpResponse httpResponse, String urlString, String contentEncoding, HttpURLConnection urlConnection) throws IOException {
 		final String realURL=urlConnection.getURL().toString();
-		httpResponser.setRealURL(realURL);
-		httpResponser.setContentEncoding(contentEncoding);
-		httpResponser.setResponseCode(responseCode);
+		httpResponse.setRealURL(realURL);
+		httpResponse.setResponseCode(urlConnection.getResponseCode());
 		byte[] htmlByte =null;
 		
 		String encoding = urlConnection.getContentEncoding();
+		
+		if(urlConnection.getResponseCode()==404){
+			httpResponse.setContentEncoding(contentEncoding);
+			httpResponse.setContent("");
+			return;
+		}
+		// 得到响应流
+		InputStream inputStream = urlConnection.getInputStream();
 		InputStream gzipInputStream=inputStream;
 		try{
 			if(encoding!=null && encoding.indexOf("gzip")!=-1){
 				gzipInputStream = new GZIPInputStream(inputStream);
 			}
 		}catch(Exception e){
-			log.warn(e);
+			logger.warn(e.getMessage());
 		}
-		htmlByte = readByte(gzipInputStream);
+		String content=null;
+		if(contentEncoding==null){
+			ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+			contentEncoding=htmlCharsetDetector(urlConnection, byteArrayOutputStream, gzipInputStream);
+			htmlByte = byteArrayOutputStream.toByteArray();
+			byteArrayOutputStream.close(); 
+			content=new String(htmlByte, contentEncoding);
+		}else{
+			htmlByte = readByte(gzipInputStream);
+			content=new String(htmlByte, contentEncoding);
+		}
+		httpResponse.setContentEncoding(contentEncoding);
+        httpResponse.setLength(htmlByte.length);
+		httpResponse.setContent(content);
 		
-        httpResponser.setLength(htmlByte.length);
-		httpResponser.setContent(new String(htmlByte, contentEncoding));
-		inputStream.close();
-		return httpResponser;
-	}
-
-	public static final String htmlCharsetDetector(String urlString) throws IOException {
-		URL url = new URL(urlString);
-		HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
-		urlConnection.setConnectTimeout(TIMEOUT);
-		urlConnection.setReadTimeout(TIMEOUT);
-		return htmlCharsetDetector(urlConnection.getInputStream());
+		gzipInputStream.close();
 	}
 	
+    
 	@SuppressWarnings("unused")
-	private static final void readByBufferedReader(InputStream inStream,String receiveEncoding, HttpResponse httpResponser) throws IOException{
+	private static final void readByBufferedReader(InputStream inStream,String receiveEncoding, HttpResponse httpResponse) throws IOException{
 		BufferedReader bufferedReader = new BufferedReader(
 				new InputStreamReader(inStream,receiveEncoding));
 		StringBuffer temp = new StringBuffer("");
@@ -385,8 +476,8 @@ public final class HttpRequester {
 				temp.append("\r\n");
 		}
 		bufferedReader.close();
-		httpResponser.setContent(temp.toString());
-		httpResponser.setLength(httpResponser.getContent().length());
+		httpResponse.setContent(temp.toString());
+		httpResponse.setLength(httpResponse.getContent().length());
 	}
 	
 
@@ -422,10 +513,17 @@ public final class HttpRequester {
 		return dataByte;
 	}
 	
-	private static final String htmlCharsetDetector(InputStream inputStream) throws IOException {
+	public static final String htmlCharsetDetector(Proxy proxy, String urlString, int timeout) throws IOException {
+		URL url = new URL(urlString);
+		HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection(proxy);
+		urlConnection.setConnectTimeout(timeout);
+		urlConnection.setReadTimeout(timeout);
+		return htmlCharsetDetector(urlConnection, null, urlConnection.getInputStream());
+	}
+	private static final String htmlCharsetDetector(HttpURLConnection urlConnection, ByteArrayOutputStream byteArrayOutputStream, InputStream inputStream) throws IOException {
 		nsDetector det = new nsDetector(nsPSMDetector.ALL);
 		BufferedInputStream imp = new BufferedInputStream(inputStream);
-		byte[] buf = new byte[128];
+		byte[] buf = new byte[2048];
 		int len;
 		boolean done = false;
 		boolean isAscii = true;
@@ -434,14 +532,27 @@ public final class HttpRequester {
 				isAscii = det.isAscii(buf, len);
 			if (!isAscii && !done){
 				done = det.DoIt(buf, len, false);
+			}
+			if(byteArrayOutputStream==null){
 				break;
 			}
+			byteArrayOutputStream.write(buf, 0, len);
 		}
 		det.DataEnd();
 		if(det.getProbableCharsets()!=null&&det.getProbableCharsets().length>0){
 			return det.getProbableCharsets()[0];
 		}
-		return DEFAULT_CHARSET;
+		
+		String contentType=urlConnection.getContentType();
+		if(contentType!=null && !"".equals(contentType)){
+			//"Content-Type:text/html; charset=UTF-8", "Content-type:text/plain"
+			Pattern p = Pattern.compile("charset=([a-zA-Z0-9-]*)",Pattern.DOTALL);
+			Matcher m = p.matcher(contentType);
+			if(m.find()) {
+				return (m.group(1));
+			}
+		}
+		return null;
 	}
 	
 	@SuppressWarnings("unused")
